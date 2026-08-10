@@ -43,26 +43,67 @@ export default function OrdersPage() {
             setCart(cart.map((c) => c.product_id === product._id ? { ...c, quantity: c.quantity + 1 } : c));
         } else {
             if (product.quantity === 0) return alert("ສິນຄ້າໝົດ");
-            setCart([...cart, { product_id: product._id, productName: product.productName, productCode: product.productCode, unit: product.unit || "ອັນ", maxQty: product.quantity, quantity: 1 }]);
+            setCart([...cart, {
+                product_id: product._id,
+                productName: product.productName,
+                productCode: product.productCode,
+                category: product.category,
+                unit: product.unit || "ອັນ",
+                maxQty: product.quantity,
+                quantity: 1
+            }]);
         }
     };
     const updateQty = (id, qty) => {
         const item = cart.find((c) => c.product_id === id);
-        if (qty < 1) return;
-        if (qty > item.maxQty) return alert(`ຄົງເຫຼືອ ${item.maxQty}`);
-        setCart(cart.map((c) => c.product_id === id ? { ...c, quantity: qty } : c));
+
+        if (!item) return;
+
+        // ป้องกันค่าที่ไม่ใช่ตัวเลข
+        const newQty = Number(qty);
+
+        if (Number.isNaN(newQty)) return;
+
+        // ห้ามต่ำกว่า 1
+        if (newQty < 1) return;
+
+        // ห้ามเกิน Stock
+        if (newQty > item.maxQty) {
+            alert(`ຄົງເຫຼືອ ${item.maxQty} ${item.unit}`);
+            return;
+        }
+
+        setCart(cart.map((c) =>
+            c.product_id === id
+                ? { ...c, quantity: newQty }
+                : c
+        ));
     };
     const removeFromCart = (id) => setCart(cart.filter((c) => c.product_id !== id));
 
     const handleCreateOrder = async () => {
         try {
-            if (!selectedBranch) return setError("ກະລຸນາເລືອກສາຂາ");
-            if (cart.length === 0) return setError("ກະລຸນາເລືອກສິນຄ້າ");
-            await axios.post("/orders", { branch: selectedBranch, items: cart.map((c) => ({ product_id: c.product_id, productName: c.productName, quantity: c.quantity })) });
-            setCart([]); setSelectedBranch(""); setSearchProduct(""); setFilterMain(""); setError("");
-            fetchMyOrders(); fetchProducts();
-            alert("ສັ່ງຂອງສຳເລັດ!");
-        } catch (err) { setError(err.response?.data?.message || "ເກີດຂໍ້ຜິດພາດ"); }
+            // ไม่ต้องส่ง branch มาแล้ว Backend จัดการให้เองจาก user
+            if (cart.length === 0) return setError("ກະລຸນາເລືອກສິນຄ້າຢ່າງໜ້ອຍ 1 ລາຍການ");
+
+            await axios.post("/orders", {
+                items: cart.map((c) => ({
+                    product_id: c.product_id,
+                    productName: c.productName,
+                    quantity: c.quantity
+                }))
+            });
+
+            setCart([]);
+            setSearchProduct("");
+            setFilterMain("");
+            setError("");
+            fetchMyOrders();
+            fetchProducts();
+            alert("ສັ່ງສິນຄ້າສຳເລັດ!");
+        } catch (err) {
+            setError(err.response?.data?.message || "ເກີດຂໍ້ຜິດພາດ");
+        }
     };
     const handleCancel = async (id) => { if (!window.confirm("ຢືນຢັນຍົກເລີກ?")) return; try { await axios.delete(`/orders/${id}`); fetchOrders(); } catch { setError("ຍົກເລີກບໍ່ສຳເລັດ"); } };
     const handleUpdateStatus = async (id, status) => { try { await axios.put(`/orders/${id}/status`, { status }); fetchOrders(); } catch { setError("ອັບເດດບໍ່ສຳເລັດ"); } };
@@ -152,12 +193,17 @@ export default function OrdersPage() {
                                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, color: "#0f172a", display: "flex", alignItems: "center", gap: 7 }}>
                                     <i className="ti ti-shopping-cart" style={{ fontSize: 18 }} />ກະຕ່າ
                                 </h3>
-                                <div className="form-field">
+                                {/* <div className="form-field">
                                     <label className="form-label">ເລືອກສາຂາ</label>
                                     <select className="form-input" value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
                                         <option value="">-- ເລືອກສາຂາ --</option>
                                         {branches.map((b) => <option key={b._id} value={b._id}>{b.branchName}</option>)}
                                     </select>
+                                </div> */}
+                                <span>🏪</span>
+                                <div>
+                                    <div style={{ fontSize: "11px", color: "#16a34a", fontWeight: "500" }}>ສາຂາ</div>
+                                    <div style={{ fontWeight: "600", color: "#0f172a" }}>{user?.branch || "-"}</div>
                                 </div>
                                 {error && <div className="alert alert-error"><i className="ti ti-alert-triangle" />{error}</div>}
                                 {cart.length === 0 ? (
@@ -169,20 +215,282 @@ export default function OrdersPage() {
                                 ) : (
                                     <>
                                         {cart.map((item) => (
-                                            <div key={item.product_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
-                                                <div style={{ flex: 1 }}>
-                                                    <div style={{ fontSize: 11, color: "#94a3b8" }}>{item.productCode}</div>
-                                                    <div style={{ fontWeight: 500, fontSize: 13, color: "#0f172a" }}>{item.productName}</div>
-                                                    <span className="badge badge-purple" style={{ fontSize: 11, marginTop: 2 }}>{item.unit}</span>
-                                                </div>
-                                                <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
-                                                    <button style={{ width: 26, height: 26, border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => updateQty(item.product_id, item.quantity - 1)}>−</button>
-                                                    <span style={{ width: 28, textAlign: "center", fontWeight: 600, fontSize: 14 }}>{item.quantity}</span>
-                                                    <button style={{ width: 26, height: 26, border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => updateQty(item.product_id, item.quantity + 1)}>+</button>
-                                                    <button style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "#fee2e2", color: "#dc2626", cursor: "pointer", marginLeft: 4, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => removeFromCart(item.product_id)}>
-                                                        <i className="ti ti-x" style={{ fontSize: 13 }} />
+                                            <div
+                                                key={item.product_id}
+                                                style={{
+                                                    padding: "10px 0",
+                                                    borderBottom: "1px solid #f1f5f9"
+                                                }}
+                                            >
+                                                {/* Product information */}
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        justifyContent: "space-between",
+                                                        alignItems: "flex-start",
+                                                        gap: 10
+                                                    }}
+                                                >
+
+                                                    <div style={{ flex: 1 }}>
+
+                                                        {/* Product Code */}
+                                                        <div
+                                                            style={{
+                                                                fontSize: 11,
+                                                                color: "#94a3b8",
+                                                                marginBottom: 2
+                                                            }}
+                                                        >
+                                                            {item.productCode}
+                                                        </div>
+
+                                                        {/* Product Name */}
+                                                        <div
+                                                            style={{
+                                                                fontWeight: 500,
+                                                                fontSize: 13,
+                                                                color: "#0f172a",
+                                                                marginBottom: 5
+                                                            }}
+                                                        >
+                                                            {item.productName}
+                                                        </div>
+
+                                                        {/* Category */}
+                                                        {item.category?.mainCategory && (
+                                                            <div
+                                                                style={{
+                                                                    fontSize: 11,
+                                                                    color: "#64748b",
+                                                                    marginBottom: 5
+                                                                }}
+                                                            >
+                                                                ໝວດໝູ່:{" "}
+                                                                <span
+                                                                    style={{
+                                                                        fontWeight: 500,
+                                                                        color: "#2563eb"
+                                                                    }}
+                                                                >
+                                                                    {item.category.mainCategory}
+                                                                </span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Sub Category ถ้ามี */}
+                                                        {item.category?.subCategory && (
+                                                            <div
+                                                                style={{
+                                                                    fontSize: 11,
+                                                                    color: "#94a3b8",
+                                                                    marginBottom: 5
+                                                                }}
+                                                            >
+                                                                {item.category.subCategory}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Unit */}
+                                                        <span
+                                                            className="badge badge-purple"
+                                                            style={{
+                                                                fontSize: 11
+                                                            }}
+                                                        >
+                                                            {item.unit}
+                                                        </span>
+
+                                                    </div>
+
+                                                    {/* Remove */}
+                                                    <button
+                                                        style={{
+                                                            width: 32,
+                                                            height: 32,
+                                                            border: "none",
+                                                            borderRadius: 7,
+                                                            background: "#fee2e2",
+                                                            color: "#dc2626",
+                                                            cursor: "pointer",
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            justifyContent: "center"
+                                                        }}
+                                                        onClick={() => removeFromCart(item.product_id)}
+                                                    >
+                                                        <i
+                                                            className="ti ti-x"
+                                                            style={{ fontSize: 14 }}
+                                                        />
                                                     </button>
+
                                                 </div>
+
+                                                {/* Quantity Control */}
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        justifyContent: "space-between",
+                                                        marginTop: 10,
+                                                        gap: 8
+                                                    }}
+                                                >
+
+                                                    <span
+                                                        style={{
+                                                            fontSize: 11,
+                                                            color: "#94a3b8"
+                                                        }}
+                                                    >
+                                                        ຈຳນວນ
+                                                    </span>
+
+                                                    <div
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 5
+                                                        }}
+                                                    >
+
+                                                        {/* Minus */}
+                                                        <button
+                                                            type="button"
+                                                            disabled={item.quantity <= 1}
+                                                            style={{
+                                                                width: 32,
+                                                                height: 32,
+                                                                border: "1px solid #e2e8f0",
+                                                                borderRadius: 7,
+                                                                background:
+                                                                    item.quantity <= 1
+                                                                        ? "#f8fafc"
+                                                                        : "#fff",
+                                                                color:
+                                                                    item.quantity <= 1
+                                                                        ? "#cbd5e1"
+                                                                        : "#334155",
+                                                                cursor:
+                                                                    item.quantity <= 1
+                                                                        ? "not-allowed"
+                                                                        : "pointer",
+                                                                fontSize: 18,
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "center"
+                                                            }}
+                                                            onClick={() =>
+                                                                updateQty(
+                                                                    item.product_id,
+                                                                    item.quantity - 1
+                                                                )
+                                                            }
+                                                        >
+                                                            −
+                                                        </button>
+
+                                                        {/* Input จำนวน */}
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={item.maxQty}
+                                                            value={item.quantity}
+                                                            onChange={(e) => {
+                                                                const value = e.target.value;
+
+                                                                // อนุญาตให้ลบค่าเพื่อพิมพ์ใหม่
+                                                                if (value === "") {
+                                                                    setCart(cart.map((c) =>
+                                                                        c.product_id === item.product_id
+                                                                            ? { ...c, quantity: "" }
+                                                                            : c
+                                                                    ));
+                                                                    return;
+                                                                }
+
+                                                                updateQty(
+                                                                    item.product_id,
+                                                                    value
+                                                                );
+                                                            }}
+                                                            onBlur={() => {
+                                                                // ถ้าปล่อยช่องว่าง ให้กลับเป็น 1
+                                                                if (
+                                                                    item.quantity === "" ||
+                                                                    Number(item.quantity) < 1
+                                                                ) {
+                                                                    updateQty(
+                                                                        item.product_id,
+                                                                        1
+                                                                    );
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                width: 55,
+                                                                height: 32,
+                                                                border: "1px solid #e2e8f0",
+                                                                borderRadius: 7,
+                                                                textAlign: "center",
+                                                                fontWeight: 600,
+                                                                fontSize: 14,
+                                                                outline: "none"
+                                                            }}
+                                                        />
+
+                                                        {/* Plus */}
+                                                        <button
+                                                            type="button"
+                                                            disabled={item.quantity >= item.maxQty}
+                                                            style={{
+                                                                width: 32,
+                                                                height: 32,
+                                                                border: "1px solid #e2e8f0",
+                                                                borderRadius: 7,
+                                                                background:
+                                                                    item.quantity >= item.maxQty
+                                                                        ? "#f8fafc"
+                                                                        : "#fff",
+                                                                color:
+                                                                    item.quantity >= item.maxQty
+                                                                        ? "#cbd5e1"
+                                                                        : "#334155",
+                                                                cursor:
+                                                                    item.quantity >= item.maxQty
+                                                                        ? "not-allowed"
+                                                                        : "pointer",
+                                                                fontSize: 18,
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "center"
+                                                            }}
+                                                            onClick={() =>
+                                                                updateQty(
+                                                                    item.product_id,
+                                                                    item.quantity + 1
+                                                                )
+                                                            }
+                                                        >
+                                                            +
+                                                        </button>
+
+                                                    </div>
+
+                                                </div>
+
+                                                {/* Stock information */}
+                                                <div
+                                                    style={{
+                                                        fontSize: 10,
+                                                        color: "#94a3b8",
+                                                        textAlign: "right",
+                                                        marginTop: 4
+                                                    }}
+                                                >
+                                                    ຄົງເຫຼືອ {item.maxQty} {item.unit}
+                                                </div>
+
                                             </div>
                                         ))}
                                         <div style={{ padding: "10px 0", fontSize: 13, color: "#64748b", borderTop: "1px solid #f1f5f9", marginTop: 8, fontWeight: 500 }}>
@@ -320,3 +628,13 @@ export default function OrdersPage() {
         </Layout>
     );
 }
+<div style={{
+    backgroundColor: "#f0fdf4",
+    border: "1px solid #bbf7d0",
+    borderRadius: "8px",
+    padding: "10px 14px",
+    marginBottom: "12px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px"
+}}></div>

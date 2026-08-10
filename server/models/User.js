@@ -27,6 +27,10 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ["pending", "approved", "blocked"],
         default: "pending"  // ຖ້າ developer approve ກ່ອນເຂົ້າລະບົບໄດ້
+    },
+    isActive: {
+        type: Boolean,
+        default: true
     }
 }, { timestamps: true });
 

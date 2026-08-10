@@ -5,68 +5,153 @@ const { sendLowStockAlert } = require("../services/mailService");
 
 exports.createOrder = async (req, res) => {
     try {
-        const { branch, items } = req.body;
+        const { items } = req.body;
 
-        // ເຊັກ stock ກ່ອນ
-        for (const item of items) {
-            const product = await Product.findById(item.product_id);
-            if (!product)
-                return res.status(404).json({ message: `ບໍ່ພົບສິນຄ້າ: ${item.product_id}` });
-            if (product.quantity < item.quantity)
-                return res.status(400).json({ message: `ສິນຄ້າບໍ່ພໍ: ${product.productName} (ຄົງເຫລືອ ${product.quantity} ${product.unit})` });
+        // =========================
+        // 1. ตรวจสอบ items
+        // =========================
+        if (!items || items.length === 0) {
+            return res.status(400).json({
+                message: "ກະລຸນາເລືອກສິນຄ້າ"
+            });
         }
 
-        // ສ້າງ Order
+        // =========================
+        // 2. ดึง User ที่ Login อยู่
+        // =========================
+        const User = require("../models/User");
+        const currentUser = await User.findById(req.user.id);
+
+        if (!currentUser) {
+            return res.status(404).json({
+                message: "ບໍ່ພົບຜູ້ໃຊ້"
+            });
+        }
+
+        // =========================
+        // 3. ตรวจสอบว่า User มีสาขา
+        // =========================
+        if (!currentUser.branch) {
+            return res.status(400).json({
+                message: "ບັນຊີນີ້ບໍ່ມີສາຂາ"
+            });
+        }
+
+        // =========================
+        // 4. หา Branch ของ User
+        // =========================
+        const Branch = require("../models/Branch");
+
+        const userBranch = await Branch.findOne({
+            branchName: currentUser.branch
+        });
+
+        if (!userBranch) {
+            return res.status(404).json({
+                message: `ບໍ່ພົບສາຂາ ${currentUser.branch}`
+            });
+        }
+
+        // =========================
+        // 5. ตรวจสอบ Stock ก่อน
+        // =========================
+        for (const item of items) {
+            const product = await Product.findById(item.product_id);
+
+            if (!product) {
+                return res.status(404).json({
+                    message: `ไม่พบสินค้า: ${item.product_id}`
+                });
+            }
+
+            if (product.quantity < item.quantity) {
+                return res.status(400).json({
+                    message: `สินค้าไม่พอ: ${product.productName} (คงเหลือ ${product.quantity} ${product.unit})`
+                });
+            }
+        }
+
+        // =========================
+        // 6. สร้าง Order
+        // ใช้ Branch ของ User เท่านั้น
+        // =========================
         const order = await Order.create({
-            branch,
+            branch: userBranch._id,
             orderedBy: req.user.id,
             items
         });
 
-        // ຕັດ stock ແບບ FIFO
+        // =========================
+        // 7. ตัด Stock แบบ FIFO
+        // =========================
         for (const item of items) {
             let remaining = item.quantity;
 
-            // ດຶງ lot ລຽງຕາມ expiry date ເກົ່າສຸດກ່ອນ
             const lots = await Lot.find({
                 product: item.product_id,
                 quantity: { $gt: 0 }
-            }).sort({ expiryDate: 1 });
+            }).sort({
+                expiryDate: 1
+            });
 
             for (const lot of lots) {
                 if (remaining <= 0) break;
-                const deduct = Math.min(lot.quantity, remaining);
+
+                const deduct = Math.min(
+                    lot.quantity,
+                    remaining
+                );
+
                 lot.quantity -= deduct;
                 remaining -= deduct;
+
                 await lot.save();
             }
 
-            // ອັບເດດ quantity ລວມໃນ Product
+            // ลด Stock
             const updated = await Product.findByIdAndUpdate(
                 item.product_id,
                 { $inc: { quantity: -item.quantity } },
-                { new: true }
+                { returnDocument: "after" }
             ).populate("category");
 
-            // ແຈ້ງເຕືອນຖ້າໃກ້ໝົດ
-            if (updated.quantity <= updated.minimumStock) {
+            // =========================
+            // Low Stock Alert
+            // =========================
+            if (
+                updated &&
+                updated.quantity <= updated.minimumStock
+            ) {
                 await sendLowStockAlert({
                     productName: updated.productName,
                     productCode: updated.productCode,
                     quantity: updated.quantity,
                     minimumStock: updated.minimumStock,
-                    mainCategory: updated.category?.mainCategory || "-",
-                    subCategory: updated.category?.subCategory || "-",
-                    unit: updated.unit || "ອັນ",
-                    branchName: null,
-                    branchEmail: null
+                    mainCategory:
+                        updated.category?.mainCategory || "-",
+                    subCategory:
+                        updated.category?.subCategory || "-",
+                    unit:
+                        updated.unit || "ອັນ",
+                    branchName:
+                        userBranch.branchName,
+                    branchEmail:
+                        null
                 });
             }
         }
 
+        // =========================
+        // 8. ส่ง Order กลับ
+        // =========================
         res.status(201).json(order);
+
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error("Create Order Error:", error);
+
+        res.status(500).json({
+            error: error.message
+        });
     }
 };
 
@@ -76,8 +161,16 @@ exports.getOrders = async (req, res) => {
         const orders = await Order.find()
             .populate("branch", "branchName")
             .populate("orderedBy", "name email")
-            .populate("items.product_id", "productName productCode unit category")  // ເພີ່ມ unit category
+            .populate({
+                path: "items.product_id",
+                select: "productName productCode unit category",
+                populate: {
+                    path: "category",
+                    select: "mainCategory subCategory"
+                }
+            })
             .sort({ createdAt: -1 });
+
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -91,7 +184,7 @@ exports.updateOrderStatus = async (req, res) => {
         const updated = await Order.findByIdAndUpdate(
             req.params.id,
             { status },
-            { new: true }
+            { returnDocument: "after" }
         );
         if (!updated)
             return res.status(404).json({ message: "Order not found" });
@@ -130,8 +223,16 @@ exports.getMyOrders = async (req, res) => {
         const orders = await Order.find({ orderedBy: req.user.id })
             .populate("branch", "branchName")
             .populate("orderedBy", "name email")
-            .populate("items.product_id", "productName productCode unit category")  // ເພີ່ມ unit category
+            .populate({
+                path: "items.product_id",
+                select: "productName productCode unit category",
+                populate: {
+                    path: "category",
+                    select: "mainCategory subCategory"
+                }
+            })
             .sort({ createdAt: -1 });
+
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: error.message });
